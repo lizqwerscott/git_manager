@@ -1,5 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process;
+use std::time::Duration;
+
+use tokio::process::Command;
+use tokio::signal::ctrl_c;
+use tokio::time::timeout;
 
 pub type BDError = Box<dyn std::error::Error>;
 pub type BDEResult<T> = Result<T, BDError>;
@@ -40,14 +45,79 @@ pub fn ba_error(error: &str) -> Box<dyn std::error::Error> {
 
 #[derive(Debug)]
 enum GitStatus {
+    Clean,
+    NeedPull,
+    NeedPush,
+    NeddCommit,
     Another,
 }
 
 #[derive(Debug)]
 pub struct GitRepo {
-    name: String,
+    pub name: String,
     path: PathBuf,
     status: GitStatus,
+}
+
+impl GitRepo {
+    pub async fn refresh_status(&mut self) -> BDEResult<()> {
+        let status_res = run_command(format!("cd {} && git status", self.path.display()).as_str())?;
+        let working_tree_clean = status_res.contains("working tree clean");
+
+        if working_tree_clean {
+            self.status = GitStatus::Clean;
+
+            let have_remote =
+                !run_command(format!("cd {} && git remote show", self.path.display()).as_str())?
+                    .is_empty();
+
+            if have_remote {
+                run_command_timeout(
+                    format!("cd {} && git fetch", self.path.display()).as_str(),
+                    5,
+                )
+                .await?;
+                let status_after_fetch_res =
+                    run_command(format!("cd {} && git status", self.path.display()).as_str())?;
+                let need_pull = status_after_fetch_res.contains("git pull");
+                if need_pull {
+                    self.status = GitStatus::NeedPull;
+                }
+
+                let need_push = status_after_fetch_res.contains("git push");
+                if need_push {
+                    self.status = GitStatus::NeedPush;
+                }
+            }
+        } else {
+            self.status = GitStatus::NeddCommit;
+        }
+
+        Ok(())
+    }
+
+    pub fn print_status(&self) {
+        println!("repo: {}, status: {:?}", self.name, self.status);
+    }
+
+    pub fn get_last_commit_time(&self) -> u64 {
+        // println!("get commit: {}", self.path.display());
+
+        let res = run_command(
+            format!(
+                "cd {} && git show --pretty=format:'%ct' | head -1",
+                self.path.display()
+            )
+            .as_str(),
+        )
+        .unwrap();
+        // println!("{}: commit time: {}", self.path.display(), res);
+        if res.trim().is_empty() {
+            0
+        } else {
+            res.trim().parse().unwrap()
+        }
+    }
 }
 
 pub fn run_command(command: &str) -> BDEResult<String> {
@@ -60,6 +130,37 @@ pub fn run_command(command: &str) -> BDEResult<String> {
         Err(error) => Err(ba_error(
             format!("执行命令失败: {}", error.to_string()).as_mut_str(),
         )),
+    }
+}
+
+pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResult<String> {
+    let timeout_duration = Duration::from_secs(timeout_second);
+
+    let mut child = Command::new("bash")
+        .arg("-c")
+        .arg(command)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn command: {}", e))?;
+
+    // Create a future that resolves when Ctrl+C is pressed
+    let ctrl_c_future = ctrl_c();
+
+    tokio::select! {
+        // Wait for the command to complete
+        _ = child.wait() => {
+            let output = child.wait_with_output().await?;
+            if output.status.success() {
+                Ok(String::from_utf8(output.stdout).unwrap())
+            } else {
+                Err(format!("Command failed with exit code: {}", output.status).into())
+            }
+        }
+
+        // Wait for Ctrl+C or timeout
+        _ = timeout(timeout_duration, ctrl_c_future) => {
+            child.kill().await?;
+            Err(ba_error("Command timed out"))
+        }
     }
 }
 
@@ -81,7 +182,7 @@ pub fn search_all_git_repo(path: &Path) -> BDEResult<Vec<GitRepo>> {
 
     println!("command: {}", command);
     let find_res = run_command(&command)?;
-    let git_repos: Vec<GitRepo> = find_res
+    let mut git_repos: Vec<GitRepo> = find_res
         .split('\n')
         .map(|path| {
             let path = Path::new(path);
@@ -101,6 +202,8 @@ pub fn search_all_git_repo(path: &Path) -> BDEResult<Vec<GitRepo>> {
             }
         })
         .collect();
+
+    git_repos.sort_by(|a, b| b.get_last_commit_time().cmp(&a.get_last_commit_time()));
 
     Ok(git_repos)
 }
