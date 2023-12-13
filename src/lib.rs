@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::process;
+use std::process::{self, Stdio};
 use std::time::Duration;
+use std::fmt;
 
 use tokio::process::Command;
 use tokio::signal::ctrl_c;
@@ -43,13 +44,25 @@ pub fn ba_error(error: &str) -> Box<dyn std::error::Error> {
     Box::new(GitError::new(error))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum GitStatus {
     Clean,
     NeedPull,
     NeedPush,
-    NeddCommit,
+    NeedCommit,
     Another,
+}
+
+impl fmt::Display for GitStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            GitStatus::Clean => write!(f, "干净"),
+            GitStatus::NeedPull => write!(f, "需要拉取"),
+            GitStatus::NeedPush => write!(f, "需要推送"),
+            GitStatus::NeedCommit => write!(f, "需要Commit"),
+            GitStatus::Another => write!(f, "其它"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -90,14 +103,10 @@ impl GitRepo {
                 }
             }
         } else {
-            self.status = GitStatus::NeddCommit;
+            self.status = GitStatus::NeedCommit;
         }
 
         Ok(())
-    }
-
-    pub fn print_status(&self) {
-        println!("repo: {}, status: {:?}", self.name, self.status);
     }
 
     pub fn get_last_commit_time(&self) -> u64 {
@@ -120,6 +129,17 @@ impl GitRepo {
     }
 }
 
+impl fmt::Display for GitRepo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{:20}: {:10}",
+            self.name,
+            self.status.to_string()
+        )
+    }
+}
+
 pub fn run_command(command: &str) -> BDEResult<String> {
     match process::Command::new("bash")
         .arg("-c")
@@ -139,6 +159,8 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
     let mut child = Command::new("bash")
         .arg("-c")
         .arg(command)
+        .stdout(Stdio::piped())  // 捕获标准输出
+        .stderr(Stdio::null())   // 将标准错误重定向到空
         .spawn()
         .map_err(|e| format!("Failed to spawn command: {}", e))?;
 
