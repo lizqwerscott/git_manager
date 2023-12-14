@@ -1,7 +1,8 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Stdio};
 use std::time::Duration;
-use std::fmt;
+use tokio::task::JoinSet;
 
 use tokio::process::Command;
 use tokio::signal::ctrl_c;
@@ -45,7 +46,7 @@ pub fn ba_error(error: &str) -> Box<dyn std::error::Error> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum GitStatus {
+pub enum GitStatus {
     Clean,
     NeedPull,
     NeedPush,
@@ -68,75 +69,80 @@ impl fmt::Display for GitStatus {
 #[derive(Debug)]
 pub struct GitRepo {
     pub name: String,
-    path: PathBuf,
-    status: GitStatus,
+    pub path: PathBuf,
+    pub status: GitStatus,
+    pub last_commit_time: u64,
 }
 
 impl GitRepo {
-    pub async fn refresh_status(&mut self) -> BDEResult<()> {
-        let status_res = run_command(format!("cd {} && git status", self.path.display()).as_str())?;
+    pub async fn build(path: &Path) -> BDEResult<Self> {
+        let last_commit_time = GitRepo::get_last_commit_time(path)?;
+
+        let status = GitRepo::get_status(path).await?;
+
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+
+        Ok(GitRepo {
+            name: String::from(file_name),
+            path: PathBuf::from(path),
+            status,
+            last_commit_time,
+        })
+    }
+
+    pub async fn get_status(path: &Path) -> BDEResult<GitStatus> {
+        let status_res = run_command(format!("cd {} && git status", path.display()).as_str())?;
         let working_tree_clean = status_res.contains("working tree clean");
 
-        if working_tree_clean {
-            self.status = GitStatus::Clean;
+        Ok(if working_tree_clean {
+            let mut new_status = GitStatus::Clean;
 
             let have_remote =
-                !run_command(format!("cd {} && git remote show", self.path.display()).as_str())?
+                !run_command(format!("cd {} && git remote show", path.display()).as_str())?
                     .is_empty();
 
             if have_remote {
-                run_command_timeout(
-                    format!("cd {} && git fetch", self.path.display()).as_str(),
-                    5,
-                )
-                .await?;
+                run_command_timeout(format!("cd {} && git fetch", path.display()).as_str(), 5)
+                    .await?;
                 let status_after_fetch_res =
-                    run_command(format!("cd {} && git status", self.path.display()).as_str())?;
+                    run_command(format!("cd {} && git status", path.display()).as_str())?;
                 let need_pull = status_after_fetch_res.contains("git pull");
                 if need_pull {
-                    self.status = GitStatus::NeedPull;
+                    new_status = GitStatus::NeedPull;
                 }
 
                 let need_push = status_after_fetch_res.contains("git push");
                 if need_push {
-                    self.status = GitStatus::NeedPush;
+                    new_status = GitStatus::NeedPush;
                 }
             }
-        } else {
-            self.status = GitStatus::NeedCommit;
-        }
 
-        Ok(())
+            new_status
+        } else {
+            GitStatus::NeedCommit
+        })
     }
 
-    pub fn get_last_commit_time(&self) -> u64 {
-        // println!("get commit: {}", self.path.display());
-
+    pub fn get_last_commit_time(path: &Path) -> BDEResult<u64> {
         let res = run_command(
             format!(
                 "cd {} && git show --pretty=format:'%ct' | head -1",
-                self.path.display()
+                path.display()
             )
             .as_str(),
-        )
-        .unwrap();
+        )?;
         // println!("{}: commit time: {}", self.path.display(), res);
-        if res.trim().is_empty() {
+        Ok(if res.trim().is_empty() {
             0
         } else {
-            res.trim().parse().unwrap()
-        }
+            res.trim().parse()?
+        })
     }
 }
 
 impl fmt::Display for GitRepo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:20}: {:10}",
-            self.name,
-            self.status.to_string()
-        )
+        write!(f, "{:20}: {:10}", self.name, self.status.to_string())
     }
 }
 
@@ -147,9 +153,7 @@ pub fn run_command(command: &str) -> BDEResult<String> {
         .output()
     {
         Ok(output) => Ok(String::from_utf8(output.stdout).unwrap()),
-        Err(error) => Err(ba_error(
-            format!("执行命令失败: {}", error.to_string()).as_mut_str(),
-        )),
+        Err(error) => Err(ba_error(format!("执行命令失败: {}", error).as_mut_str())),
     }
 }
 
@@ -159,8 +163,8 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
     let mut child = Command::new("bash")
         .arg("-c")
         .arg(command)
-        .stdout(Stdio::piped())  // 捕获标准输出
-        .stderr(Stdio::null())   // 将标准错误重定向到空
+        .stdout(Stdio::piped()) // 捕获标准输出
+        .stderr(Stdio::null()) // 将标准错误重定向到空
         .spawn()
         .map_err(|e| format!("Failed to spawn command: {}", e))?;
 
@@ -186,7 +190,7 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
     }
 }
 
-pub fn search_all_git_repo(path: &Path) -> BDEResult<Vec<GitRepo>> {
+pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<Vec<GitRepo>> {
     let ignore_dir = vec![".cache", ".local", ".cargo"];
     let search_git_str = "^\\..*git$";
 
@@ -199,33 +203,39 @@ pub fn search_all_git_repo(path: &Path) -> BDEResult<Vec<GitRepo>> {
         "fd -t d -H {} '{}' {}",
         ignore_dir_str.join(" "),
         search_git_str,
-        path.display()
+        search_path.display()
     );
 
     println!("command: {}", command);
     let find_res = run_command(&command)?;
-    let mut git_repos: Vec<GitRepo> = find_res
+    let all_paths: Vec<&Path> = find_res
         .split('\n')
-        .map(|path| {
-            let path = Path::new(path);
-            path.parent()
-        })
-        .filter_map(|path| {
-            if let Some(path) = path {
-                let file_name = path.file_name().unwrap().to_str().unwrap();
-
-                Some(GitRepo {
-                    name: String::from(file_name),
-                    path: PathBuf::from(path),
-                    status: GitStatus::Another,
-                })
-            } else {
-                None
-            }
-        })
+        .filter_map(|path| Path::new(path).parent())
         .collect();
 
-    git_repos.sort_by(|a, b| b.get_last_commit_time().cmp(&a.get_last_commit_time()));
+    let mut set = JoinSet::new();
+    for path in all_paths {
+        let path_str = path.display().to_string();
+
+        set.spawn(async move {
+            let path = Path::new(&path_str);
+            match GitRepo::build(path).await {
+                Ok(repo) => Some(repo),
+                Err(err) => {
+                    println!("build err({}): {}", path.display(), err);
+                    None
+                }
+            }
+        });
+    }
+
+    let mut git_repos: Vec<GitRepo> = Vec::new();
+    while let Some(Ok(Some(res))) = set.join_next().await {
+        git_repos.push(res);
+    }
+
+    git_repos.sort_by_key(|item| item.last_commit_time);
+    git_repos.reverse();
 
     Ok(git_repos)
 }

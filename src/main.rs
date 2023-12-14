@@ -4,19 +4,16 @@ use git_manager::search_all_git_repo;
 
 #[tokio::main]
 async fn main() {
-    // let mut repos = search_all_git_repo(Path::new("~/AndroidStudioProjects/")).unwrap();
-    let mut repos = search_all_git_repo(Path::new("~/")).unwrap();
+    let test_path_1 = "~/";
+    let test_path_2 = "~/AndroidStudioProjects/";
+    
+    let search_path = Path::new(test_path_1);
+
+    let mut repos = search_all_git_repo(search_path).await.unwrap();
 
     println!("res: {}", repos.len());
     println!("{:16}: {:10}", "仓库名字", "状态");
     for repo in repos.iter_mut() {
-        // println!("start refresh commit: {}", repo.name);
-        match repo.refresh_status().await {
-            Ok(_) => {}
-            Err(err) => {
-                println!("{}: refresh status run err: {}", repo.name, err);
-            }
-        }
         println!("{}", repo);
     }
 }
