@@ -102,7 +102,7 @@ impl GitRepo {
                     .is_empty();
 
             if have_remote {
-                run_command_timeout(format!("cd {} && git fetch", path.display()).as_str(), 5)
+                run_command_timeout(format!("cd {} && git fetch", path.display()).as_str(), 10)
                     .await?;
                 let status_after_fetch_res =
                     run_command(format!("cd {} && git status", path.display()).as_str())?;
@@ -178,7 +178,7 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
             if output.status.success() {
                 Ok(String::from_utf8(output.stdout).unwrap())
             } else {
-                Err(format!("Command failed with exit code: {}", output.status).into())
+                Err(format!("Command failed with exit code({}): {}", output.status, String::from_utf8(output.stdout).unwrap()).into())
             }
         }
 
@@ -190,7 +190,7 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
     }
 }
 
-pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<Vec<GitRepo>> {
+pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>, u64)> {
     let ignore_dir = vec![".cache", ".local", ".cargo"];
     let search_git_str = "^\\..*git$";
 
@@ -230,12 +230,24 @@ pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<Vec<GitRepo>> 
     }
 
     let mut git_repos: Vec<GitRepo> = Vec::new();
-    while let Some(Ok(Some(res))) = set.join_next().await {
-        git_repos.push(res);
+    let mut err_len = 0;
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok(repo) => {
+                if let Some(repo) = repo {
+                    git_repos.push(repo);
+                } else {
+                    err_len += 1;
+                }
+            }
+            Err(err) => {
+                err_len += 1;
+            }
+        }
     }
 
     git_repos.sort_by_key(|item| item.last_commit_time);
     git_repos.reverse();
 
-    Ok(git_repos)
+    Ok((git_repos, err_len))
 }
