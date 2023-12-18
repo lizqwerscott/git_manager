@@ -1,253 +1,340 @@
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::process::{self, Stdio};
-use std::time::Duration;
-use tokio::task::JoinSet;
+use crossterm::{
+    event::{self, Event, KeyCode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
+};
+use ratatui::{prelude::*, widgets::*};
+use std::io::stdout;
+use std::path::Path;
+use tokio::sync::mpsc;
 
-use tokio::process::Command;
-use tokio::signal::ctrl_c;
-use tokio::time::timeout;
+mod gitrepo;
+pub mod utils;
 
-pub type BDError = Box<dyn std::error::Error>;
-pub type BDEResult<T> = Result<T, BDError>;
+use gitrepo::search_all_git_repo;
+use gitrepo::GitRepo;
+use utils::BDEResult;
 
-#[derive(Debug, Clone)]
-pub struct GitError {
-    err: String,
-}
-
-impl GitError {
-    pub fn new(err: &str) -> GitError {
-        GitError {
-            err: err.to_string(),
-        }
-    }
-}
-
-impl std::fmt::Display for GitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.err)
-    }
-}
-
-impl std::error::Error for GitError {
-    fn description(&self) -> &str {
-        &self.err
-    }
-
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        // 泛型错误。没有记录其内部原因。
-        None
-    }
-}
-
-pub fn ba_error(error: &str) -> Box<dyn std::error::Error> {
-    Box::new(GitError::new(error))
+#[derive(Debug, Clone, Copy)]
+enum AppAction {
+    None,
+    StartRefresh,
+    StartFilter,
+    SelectNext,
+    SelectPervious,
+    Quit,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum GitStatus {
-    Clean,
-    NeedPull,
-    NeedPush,
-    NeedCommit,
-    Another,
-}
-
-impl fmt::Display for GitStatus {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            GitStatus::Clean => write!(f, "干净"),
-            GitStatus::NeedPull => write!(f, "需要拉取"),
-            GitStatus::NeedPush => write!(f, "需要推送"),
-            GitStatus::NeedCommit => write!(f, "需要Commit"),
-            GitStatus::Another => write!(f, "其它"),
-        }
-    }
+enum AppMode {
+    Normal,
+    Editing,
 }
 
 #[derive(Debug)]
-pub struct GitRepo {
-    pub name: String,
-    pub path: PathBuf,
-    pub status: GitStatus,
-    pub last_commit_time: u64,
+struct App {
+    refresh_repop: bool,
+    repos: Vec<GitRepo>,
+    runp: bool,
+
+    run_mode: AppMode,
+    /// Current value of the input box
+    input: String,
+    /// Position of cursor in the editor area.
+    cursor_position: usize,
 }
 
-impl GitRepo {
-    pub async fn build(path: &Path) -> BDEResult<Self> {
-        let last_commit_time = GitRepo::get_last_commit_time(path)?;
-
-        let status = GitRepo::get_status(path).await?;
-
-        let file_name = path.file_name().unwrap().to_str().unwrap();
-
-        Ok(GitRepo {
-            name: String::from(file_name),
-            path: PathBuf::from(path),
-            status,
-            last_commit_time,
-        })
+impl App {
+    fn move_cursor_left(&mut self) {
+        let cursor_moved_left = self.cursor_position.saturating_sub(1);
+        self.cursor_position = self.clamp_cursor(cursor_moved_left);
     }
 
-    pub async fn get_status(path: &Path) -> BDEResult<GitStatus> {
-        let status_res = run_command(format!("cd {} && git status", path.display()).as_str())?;
-        let working_tree_clean = status_res.contains("working tree clean");
+    fn move_cursor_right(&mut self) {
+        let cursor_moved_right = self.cursor_position.saturating_add(1);
+        self.cursor_position = self.clamp_cursor(cursor_moved_right);
+    }
 
-        Ok(if working_tree_clean {
-            let mut new_status = GitStatus::Clean;
+    fn enter_char(&mut self, new_char: char) {
+        self.input.insert(self.cursor_position, new_char);
 
-            let have_remote =
-                !run_command(format!("cd {} && git remote show", path.display()).as_str())?
-                    .is_empty();
+        self.move_cursor_right();
+    }
 
-            if have_remote {
-                run_command_timeout(format!("cd {} && git fetch", path.display()).as_str(), 10)
-                    .await?;
-                let status_after_fetch_res =
-                    run_command(format!("cd {} && git status", path.display()).as_str())?;
-                let need_pull = status_after_fetch_res.contains("git pull");
-                if need_pull {
-                    new_status = GitStatus::NeedPull;
-                }
+    fn delete_char(&mut self) {
+        let is_not_cursor_leftmost = self.cursor_position != 0;
+        if is_not_cursor_leftmost {
+            // Method "remove" is not used on the saved text for deleting the selected char.
+            // Reason: Using remove on String works on bytes instead of the chars.
+            // Using remove would require special care because of char boundaries.
 
-                let need_push = status_after_fetch_res.contains("git push");
-                if need_push {
-                    new_status = GitStatus::NeedPush;
+            let current_index = self.cursor_position;
+            let from_left_to_current_index = current_index - 1;
+
+            // Getting all characters before the selected character.
+            let before_char_to_delete = self.input.chars().take(from_left_to_current_index);
+            // Getting all characters after selected character.
+            let after_char_to_delete = self.input.chars().skip(current_index);
+
+            // Put all characters together except the selected one.
+            // By leaving the selected one out, it is forgotten and therefore deleted.
+            self.input = before_char_to_delete.chain(after_char_to_delete).collect();
+            self.move_cursor_left();
+        }
+    }
+
+    fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
+        new_cursor_pos.clamp(0, self.input.len())
+    }
+
+    fn reset_cursor(&mut self) {
+        self.cursor_position = 0;
+    }
+
+    fn handle_events(&mut self) -> BDEResult<AppAction> {
+        if event::poll(std::time::Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == event::KeyEventKind::Press {
+                    match self.run_mode {
+                        AppMode::Normal => {
+                            return Ok(match key.code {
+                                KeyCode::Char('q') => AppAction::Quit,
+                                KeyCode::Char('g') => AppAction::StartRefresh,
+                                KeyCode::Char('f') => AppAction::StartFilter,
+                                KeyCode::Char('j') => AppAction::SelectNext,
+                                KeyCode::Char('k') => AppAction::SelectPervious,
+                                _ => AppAction::None,
+                            });
+                        }
+                        AppMode::Editing => {
+                            match key.code {
+                                KeyCode::Esc => self.run_mode = AppMode::Normal,
+                                KeyCode::Char(to_insert) => {
+                                    self.enter_char(to_insert);
+                                }
+                                KeyCode::Backspace => {
+                                    self.delete_char();
+                                }
+                                KeyCode::Left => {
+                                    self.move_cursor_left();
+                                }
+                                KeyCode::Right => {
+                                    self.move_cursor_right();
+                                }
+                                _ => {}
+                            };
+                        }
+                    }
                 }
             }
+        }
 
-            new_status
-        } else {
-            GitStatus::NeedCommit
-        })
+        Ok(AppAction::None)
     }
 
-    pub fn get_last_commit_time(path: &Path) -> BDEResult<u64> {
-        let res = run_command(
-            format!(
-                "cd {} && git show --pretty=format:'%ct' | head -1",
-                path.display()
-            )
-            .as_str(),
-        )?;
-        // println!("{}: commit time: {}", self.path.display(), res);
-        Ok(if res.trim().is_empty() {
-            0
-        } else {
-            res.trim().parse()?
-        })
-    }
-}
+    fn ui(&self, frame: &mut Frame) {
+        let main_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(frame.size());
 
-impl fmt::Display for GitRepo {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:20}: {:10}", self.name, self.status.to_string())
-    }
-}
+        let (msg, style) = match self.run_mode {
+            AppMode::Normal => (
+                vec![
+                    "Press ".into(),
+                    "q".bold(),
+                    " to exit, ".into(),
+                    "f".bold(),
+                    " to start filter repo, ".bold(),
+                    "g".into(),
+                    " to refresh repo.".bold(),
+                ],
+                Style::default().add_modifier(Modifier::RAPID_BLINK),
+            ),
+            AppMode::Editing => (
+                vec!["Press ".into(), "Esc".bold(), " to stop search, ".into()],
+                Style::default(),
+            ),
+        };
 
-pub fn run_command(command: &str) -> BDEResult<String> {
-    match process::Command::new("bash")
-        .arg("-c")
-        .arg(command)
-        .output()
-    {
-        Ok(output) => Ok(String::from_utf8(output.stdout).unwrap()),
-        Err(error) => Err(ba_error(format!("执行命令失败: {}", error).as_mut_str())),
-    }
-}
+        let mut text = Text::from(Line::from(msg));
+        text.patch_style(style);
+        frame.render_widget(Paragraph::new(text), main_layout[0]);
 
-pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResult<String> {
-    let timeout_duration = Duration::from_secs(timeout_second);
+        let input = Paragraph::new(self.input.as_str())
+            .style(match self.run_mode {
+                AppMode::Normal => Style::default(),
+                AppMode::Editing => Style::default().fg(Color::Yellow),
+            })
+            .block(Block::default().borders(Borders::ALL).title("Input"));
+        frame.render_widget(input, main_layout[1]);
 
-    let mut child = Command::new("bash")
-        .arg("-c")
-        .arg(command)
-        .stdout(Stdio::piped()) // 捕获标准输出
-        .stderr(Stdio::null()) // 将标准错误重定向到空
-        .spawn()
-        .map_err(|e| format!("Failed to spawn command: {}", e))?;
+        match self.run_mode {
+            AppMode::Normal => {}
+            AppMode::Editing => {
+                frame.set_cursor(
+                    // Draw the cursor at the current position in the input field.
+                    // This position is can be controlled via the left and right arrow key
+                    main_layout[1].x + self.cursor_position as u16 + 1,
+                    // Move one line down, from the border to the input line
+                    main_layout[1].y + 1,
+                )
+            }
+        }
 
-    // Create a future that resolves when Ctrl+C is pressed
-    let ctrl_c_future = ctrl_c();
-
-    tokio::select! {
-        // Wait for the command to complete
-        _ = child.wait() => {
-            let output = child.wait_with_output().await?;
-            if output.status.success() {
-                Ok(String::from_utf8(output.stdout).unwrap())
+        if self.repos.is_empty() {
+            let repo_message = if self.refresh_repop {
+                "正在查找 Git 仓库..."
             } else {
-                Err(format!("Command failed with exit code({}): {}", output.status, String::from_utf8(output.stdout).unwrap()).into())
+                "需要刷新仓库"
+            };
+
+            frame.render_widget(
+                Paragraph::new(repo_message)
+                    .block(Block::default().title("仓库").borders(Borders::ALL)),
+                main_layout[2],
+            );
+        } else {
+            let mut table_rows = Vec::new();
+
+            for repo in &self.repos {
+                let name = repo.name.clone();
+                let repo_path = repo.path.display().to_string();
+                let mut path: Vec<&str> = repo_path.split('/').collect();
+                if path.len() >= 2 {
+                    path.drain(..3);
+                }
+                path.insert(0, "~");
+                let status = repo.status.to_string();
+
+                if name.to_lowercase().contains(&self.input) {
+                    table_rows.push(Row::new(vec![name, path.join("/"), status]));
+                }
             }
-        }
 
-        // Wait for Ctrl+C or timeout
-        _ = timeout(timeout_duration, ctrl_c_future) => {
-            child.kill().await?;
-            Err(ba_error("Command timed out"))
-        }
+            frame.render_widget(
+                Table::new(table_rows)
+                    .header(
+                        Row::new(vec!["仓库名字", "仓库路径", "仓库状态"])
+                            .style(Style::default().fg(Color::Yellow))
+                            // If you want some space between the header and the rest of the rows, you can always
+                            // specify some margin at the bottom.
+                            .bottom_margin(1),
+                    )
+                    .style(Style::default().fg(Color::White))
+                    .block(Block::default().title("仓库").borders(Borders::ALL))
+                    .widths(&[
+                        Constraint::Length(20),
+                        Constraint::Length(40),
+                        Constraint::Length(20),
+                    ])
+                    // ...and they can be separated by a fixed spacing.
+                    .column_spacing(1)
+                    // If you wish to highlight a row in any specific way when it is selected...
+                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                    // ...and potentially show a symbol in front of the selection.
+                    .highlight_symbol(">>"),
+                main_layout[2],
+            );
+        };
     }
-}
 
-pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>, u64)> {
-    let ignore_dir = vec![".cache", ".local", ".cargo"];
-    let search_git_str = "^\\..*git$";
+    async fn run(&mut self) -> BDEResult<()> {
+        let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+        let (run_tx, mut run_rx) = mpsc::unbounded_channel();
+        let (search_data_tx, mut search_data_rx) = mpsc::unbounded_channel();
+        let (data_tx, mut data_rx) = mpsc::unbounded_channel();
 
-    let ignore_dir_str: Vec<String> = ignore_dir
-        .into_iter()
-        .map(|item| format!("-E {}", item))
-        .collect();
+        tokio::spawn(async move {
+            let mut runp = true;
+            let mut get_datap = true;
 
-    let command = format!(
-        "fd -t d -H {} '{}' {}",
-        ignore_dir_str.join(" "),
-        search_git_str,
-        search_path.display()
-    );
+            while runp {
+                match run_rx.try_recv() {
+                    Ok(data) => {
+                        runp = data;
+                    }
+                    Err(_) => {}
+                };
 
-    // println!("command: {}", command);
-    let find_res = run_command(&command)?;
-    let all_paths: Vec<&Path> = find_res
-        .split('\n')
-        .filter_map(|path| Path::new(path).parent())
-        .collect();
+                match search_data_rx.try_recv() {
+                    Ok(data) => {
+                        get_datap = data;
+                    }
+                    Err(_) => {}
+                };
 
-    let mut set = JoinSet::new();
-    for path in all_paths {
-        let path_str = path.display().to_string();
-
-        set.spawn(async move {
-            let path = Path::new(&path_str);
-            match GitRepo::build(path).await {
-                Ok(repo) => Some(repo),
-                Err(err) => {
-                    println!("build err({}): {}", path.display(), err);
-                    None
+                if get_datap {
+                    let test_path_1 = "~/";
+                    let test_path_2 = "~/AndroidStudioProjects/";
+                    let search_path = Path::new(test_path_1);
+                    match search_all_git_repo(search_path).await {
+                        Ok(res) => {
+                            data_tx.send(res);
+                        }
+                        Err(_) => {
+                            data_tx.send((Vec::new(), 0));
+                        }
+                    }
+                    get_datap = false;
                 }
             }
         });
-    }
 
-    let mut git_repos: Vec<GitRepo> = Vec::new();
-    let mut err_len = 0;
-    while let Some(res) = set.join_next().await {
-        match res {
-            Ok(repo) => {
-                if let Some(repo) = repo {
-                    git_repos.push(repo);
-                } else {
-                    err_len += 1;
+        while self.runp {
+            match data_rx.try_recv() {
+                Ok(data) => {
+                    self.repos = data.0;
+                    self.refresh_repop = false;
                 }
+                Err(_) => {}
             }
-            Err(err) => {
-                err_len += 1;
+
+            terminal.draw(|f| self.ui(f))?;
+
+            match self.handle_events()? {
+                AppAction::Quit => {
+                    run_tx.send(false)?;
+                    self.runp = false
+                }
+                AppAction::StartRefresh => {
+                    if !self.refresh_repop {
+                        self.refresh_repop = true;
+                        search_data_tx.send(true)?;
+                    }
+                }
+                AppAction::StartFilter => {
+                    if !self.refresh_repop {
+                        self.run_mode = AppMode::Editing;
+                    }
+                }
+                _ => {}
             }
         }
+
+        Ok(())
     }
+}
 
-    git_repos.sort_by_key(|item| item.last_commit_time);
-    git_repos.reverse();
+pub async fn run() -> BDEResult<()> {
+    let mut app = App {
+        refresh_repop: true,
+        repos: Vec::new(),
+        runp: true,
+        run_mode: AppMode::Normal,
+        cursor_position: 0,
+        input: String::from(""),
+    };
 
-    Ok((git_repos, err_len))
+    enable_raw_mode()?;
+    stdout().execute(EnterAlternateScreen)?;
+    app.run().await?;
+    disable_raw_mode()?;
+    stdout().execute(LeaveAlternateScreen)?;
+
+    Ok(())
 }
