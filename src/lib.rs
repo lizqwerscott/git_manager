@@ -206,7 +206,7 @@ pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>,
         search_path.display()
     );
 
-    println!("command: {}", command);
+    // println!("command: {}", command);
     let find_res = run_command(&command)?;
     let all_paths: Vec<&Path> = find_res
         .split('\n')
