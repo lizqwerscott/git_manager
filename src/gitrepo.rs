@@ -17,7 +17,6 @@ pub enum GitStatus {
     NeedPush,
     NeedCommit,
     Timeout,
-    Another,
 }
 
 impl fmt::Display for GitStatus {
@@ -28,12 +27,12 @@ impl fmt::Display for GitStatus {
             GitStatus::NeedPush => write!(f, "需要推送"),
             GitStatus::NeedCommit => write!(f, "需要Commit"),
             GitStatus::Timeout => write!(f, "超时"),
-            GitStatus::Another => write!(f, "其它"),
+            // GitStatus::Another => write!(f, "其它"),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GitRepo {
     pub name: String,
     pub path: PathBuf,
@@ -47,7 +46,7 @@ impl GitRepo {
 
         let status = match GitRepo::get_status(path).await {
             Ok(res) => res,
-            Err(err) => GitStatus::Timeout,
+            Err(_) => GitStatus::Timeout,
         };
 
         let file_name = path.file_name().unwrap().to_str().unwrap();
