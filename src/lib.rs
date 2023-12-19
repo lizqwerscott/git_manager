@@ -42,9 +42,7 @@ impl App {
                 return Ok(match self.run_mode {
                     AppMode::Normal => match key.code {
                         KeyCode::Char('q') => Some(AppAction::Quit),
-                        _ => self
-                            .component_repos_show
-                            .handle_events(key)?,
+                        _ => self.component_repos_show.handle_events(key)?,
                     },
                     AppMode::Editing => self.component_input.handle_events(key)?,
                 });
@@ -162,25 +160,8 @@ impl App {
                 }
             }
 
-            self.component_repos_show.show_repos.clear();
-            for repo in &self.repos {
-                let name = repo.name.clone();
-                let repo_path = repo.path.display().to_string();
-                let mut path: Vec<&str> = repo_path.split('/').collect();
-                if path.len() >= 2 {
-                    path.drain(..3);
-                }
-                path.insert(0, "~");
-                let status = repo.status.to_string();
-
-                if name.to_lowercase().contains(&self.component_input.input) {
-                    self.component_repos_show.show_repos.push((
-                        name,
-                        path.join("/"),
-                        status.to_string(),
-                    ));
-                }
-            }
+            self.component_repos_show
+                .update_show_repos(&self.repos, &self.component_input.input)?;
 
             terminal.draw(|f| match self.ui(f) {
                 Ok(_) => {}

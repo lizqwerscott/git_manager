@@ -1,9 +1,13 @@
+use std::str::FromStr;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{prelude::*, widgets::*};
 
 use super::Component;
 use crate::states::{AppAction, AppMode};
 use crate::utils::BDEResult;
+
+use crate::gitrepo::{GitRepo, GitStatus};
 
 #[derive(Debug)]
 pub struct ReposShow {
@@ -17,6 +21,57 @@ impl ReposShow {
             show_repos: Vec::new(),
             refresh_repop: true,
         }
+    }
+
+    pub fn update_show_repos(&mut self, repos: &Vec<GitRepo>, input: &str) -> BDEResult<()> {
+        let mut filter_key: Vec<GitStatus> = Vec::new();
+        let mut other_search: Vec<&str> = Vec::new();
+
+        let key_lst: Vec<&str> = input.trim().split(' ').collect();
+
+        for key in key_lst {
+            if key.len() > 1 && key.starts_with('+') {
+                if let Ok(filter_status) = GitStatus::from_str(&key[1..]) {
+                    filter_key.push(filter_status);
+                } else {
+                    other_search.push(key);
+                }
+            } else {
+                other_search.push(key);
+            }
+        }
+
+        let search_key = other_search.join(" ");
+
+        self.show_repos.clear();
+        for repo in repos {
+            let name = repo.name.clone();
+            let repo_path = repo.path.display().to_string();
+            let mut path: Vec<&str> = repo_path.split('/').collect();
+            if path.len() >= 2 {
+                path.drain(..3);
+            }
+            path.insert(0, "~");
+            let status = repo.status.to_string();
+
+            if input.is_empty() {
+                self.show_repos
+                    .push((name, path.join("/"), status.to_string()));
+            } else {
+                let filter_status_inp = if filter_key.is_empty() {
+                    true
+                } else {
+                    filter_key.iter().any(|item| *item == repo.status)
+                };
+
+                if filter_status_inp && name.to_lowercase().contains(&search_key) {
+                    self.show_repos
+                        .push((name, path.join("/"), status.to_string()));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

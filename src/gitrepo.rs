@@ -1,16 +1,16 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Stdio};
+use std::str::FromStr;
 use std::time::Duration;
-use tokio::task::JoinSet;
-
 use tokio::process::Command;
 use tokio::signal::ctrl_c;
+use tokio::task::JoinSet;
 use tokio::time::timeout;
 
 use crate::utils::{ba_error, BDEResult};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitStatus {
     Clean,
     NeedPull,
@@ -28,6 +28,22 @@ impl fmt::Display for GitStatus {
             GitStatus::NeedCommit => write!(f, "需要Commit"),
             GitStatus::Timeout => write!(f, "超时"),
             // GitStatus::Another => write!(f, "其它"),
+        }
+    }
+}
+
+// Implement the FromStr trait for the enum
+impl FromStr for GitStatus {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "Clean" => Ok(GitStatus::Clean),
+            "NeedPull" => Ok(GitStatus::NeedPull),
+            "NeedPush" => Ok(GitStatus::NeedPush),
+            "NeedCommit" => Ok(GitStatus::NeedCommit),
+            "Timeout" => Ok(GitStatus::Timeout),
+            _ => Err(()),
         }
     }
 }
