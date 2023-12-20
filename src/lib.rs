@@ -156,6 +156,12 @@ impl App {
                     AppAction::ExitFilter => {
                         self.run_mode = AppMode::Normal;
                     }
+                    AppAction::SelectNext => {
+                        self.component_repos_show.next();
+                    }
+                    AppAction::SelectPervious => {
+                        self.component_repos_show.previous();
+                    }
                     _ => {}
                 }
             }

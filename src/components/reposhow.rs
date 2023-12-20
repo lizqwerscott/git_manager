@@ -13,6 +13,7 @@ use crate::gitrepo::{GitRepo, GitStatus};
 pub struct ReposShow {
     pub show_repos: Vec<(String, String, String)>,
     pub refresh_repop: bool,
+    pub state: TableState,
 }
 
 impl ReposShow {
@@ -20,6 +21,7 @@ impl ReposShow {
         ReposShow {
             show_repos: Vec::new(),
             refresh_repop: true,
+            state: TableState::default(),
         }
     }
 
@@ -73,6 +75,34 @@ impl ReposShow {
 
         Ok(())
     }
+
+    pub fn next(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i >= self.show_repos.len() - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
+
+    pub fn previous(&mut self) {
+        let i = match self.state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    self.show_repos.len() - 1
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.state.select(Some(i));
+    }
 }
 
 impl Component for ReposShow {
@@ -102,38 +132,41 @@ impl Component for ReposShow {
         } else {
             let mut table_rows = Vec::new();
 
-            for repo in &self.show_repos {
+            for (index, repo) in self.show_repos.iter().enumerate() {
                 table_rows.push(Row::new(vec![
+                    format!("{}", index),
                     repo.0.clone(),
                     repo.1.clone(),
                     repo.2.clone(),
                 ]));
             }
 
-            f.render_widget(
-                Table::new(table_rows)
-                    .header(
-                        Row::new(vec!["仓库名字", "仓库路径", "仓库状态"])
-                            .style(Style::default().fg(Color::Yellow))
-                            // If you want some space between the header and the rest of the rows, you can always
-                            // specify some margin at the bottom.
-                            .bottom_margin(1),
-                    )
-                    .style(Style::default().fg(Color::White))
-                    .block(Block::default().title("仓库").borders(Borders::ALL))
-                    .widths(&[
-                        Constraint::Length(20),
-                        Constraint::Length(40),
-                        Constraint::Length(20),
-                    ])
-                    // ...and they can be separated by a fixed spacing.
-                    .column_spacing(1)
-                    // If you wish to highlight a row in any specific way when it is selected...
-                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-                    // ...and potentially show a symbol in front of the selection.
-                    .highlight_symbol(">>"),
-                rect,
-            );
+            let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+
+            let header_cells = ["ID", "仓库名字", "仓库路径", "仓库状态"];
+            let header = Row::new(header_cells)
+                .style(Style::default().fg(Color::Yellow))
+                .height(1)
+                .bottom_margin(1);
+
+            let t = Table::new(table_rows)
+                .header(header)
+                .style(Style::default().fg(Color::White))
+                .block(Block::default().title("仓库").borders(Borders::ALL))
+                .widths(&[
+                    Constraint::Length(5),
+                    Constraint::Length(20),
+                    Constraint::Length(50),
+                    Constraint::Length(20),
+                ])
+                // ...and they can be separated by a fixed spacing.
+                .column_spacing(1)
+                // If you wish to highlight a row in any specific way when it is selected...
+                .highlight_style(selected_style)
+                // ...and potentially show a symbol in front of the selection.
+                .highlight_symbol(">>");
+
+            f.render_stateful_widget(t, rect, &mut self.state);
         };
 
         Ok(())
