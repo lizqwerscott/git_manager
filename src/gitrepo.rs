@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tokio::task::JoinSet;
 
-use crate::utils::{run_command, run_command_timeout, BDEResult};
+use crate::utils::{run_command, run_command_timeout_no, BDEResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitStatus {
@@ -82,7 +82,7 @@ impl GitRepo {
                     .is_empty();
 
             if have_remote {
-                run_command_timeout(format!("cd {} && git fetch", path.display()).as_str(), 10)
+                run_command_timeout_no(format!("cd {} && git fetch", path.display()).as_str(), 5)
                     .await?;
                 let status_after_fetch_res =
                     run_command(format!("cd {} && git status", path.display()).as_str())?;
@@ -127,7 +127,8 @@ impl fmt::Display for GitRepo {
 }
 
 pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>, u64)> {
-    let ignore_dir = vec![".cache", ".local", ".cargo"];
+    let ignore_dir = vec![".cache", ".local", ".cargo", "clasp"];
+    // 一旦 Fetch 在一些需要输入密码的情况下会导致仓库无法被删除
     let search_git_str = "^\\..*git$";
 
     let ignore_dir_str: Vec<String> = ignore_dir
@@ -136,13 +137,13 @@ pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>,
         .collect();
 
     let command = format!(
-        "fd -t d -H {} '{}' {}",
+        "fd -I -t d -H {} '{}' {}",
         ignore_dir_str.join(" "),
         search_git_str,
         search_path.display()
     );
 
-    // println!("command: {}", command);
+    //println!("command: {}", command);
     let find_res = run_command(&command)?;
     let all_paths: Vec<&Path> = find_res
         .split('\n')

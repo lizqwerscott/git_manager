@@ -66,6 +66,7 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
     let mut child = tokio::process::Command::new("bash")
         .arg("-c")
         .arg(command)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped()) // 捕获标准输出
         .stderr(Stdio::null()) // 将标准错误重定向到空
         .spawn()
@@ -92,6 +93,43 @@ pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResul
         }
     }
 }
+
+pub async fn run_command_timeout_no(command: &str, timeout_second: u64) -> BDEResult<()> {
+    let timeout_duration = Duration::from_secs(timeout_second);
+
+    let mut child = tokio::process::Command::new("bash")
+        .arg("-c")
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null()) // 标准输出重定向到空
+        .stderr(Stdio::null()) // 将标准错误重定向到空
+        .spawn()
+        .map_err(|e| format!("Failed to spawn command: {}", e))?;
+
+    // Create a future that resolves when Ctrl+C is pressed
+    let ctrl_c_future = ctrl_c();
+
+    tokio::select! {
+        // Wait for the command to complete
+        _ = child.wait() => {
+            Ok(())
+            // let output = child.wait_with_output().await?;
+            // if output.status.success() {
+            //     // Ok(String::from_utf8(output.stdout).unwrap())
+            //     Ok(())
+            // } else {
+            //     Err(format!("Command failed with exit code({}): {}", output.status, String::from_utf8(output.stdout).unwrap()).into())
+            // }
+        }
+
+        // Wait for Ctrl+C or timeout
+        _ = timeout(timeout_duration, ctrl_c_future) => {
+            child.kill().await?;
+            Err(ba_error("Command timed out"))
+        }
+    }
+}
+
 
 // 需要安装 xclip
 pub fn copy_to_clipboard(text: &str) -> BDEResult<()> {
