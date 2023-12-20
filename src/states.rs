@@ -11,5 +11,7 @@ pub enum AppAction {
     ExitFilter,
     SelectNext,
     SelectPervious,
+    SelectEnter,
+    SelectCopyPath,
     Quit,
 }

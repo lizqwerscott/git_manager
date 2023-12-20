@@ -1,14 +1,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{self, Stdio};
 use std::str::FromStr;
-use std::time::Duration;
-use tokio::process::Command;
-use tokio::signal::ctrl_c;
 use tokio::task::JoinSet;
-use tokio::time::timeout;
 
-use crate::utils::{ba_error, BDEResult};
+use crate::utils::{run_command, run_command_timeout, BDEResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitStatus {
@@ -128,50 +123,6 @@ impl GitRepo {
 impl fmt::Display for GitRepo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:20}: {:10}", self.name, self.status.to_string())
-    }
-}
-
-pub fn run_command(command: &str) -> BDEResult<String> {
-    match process::Command::new("bash")
-        .arg("-c")
-        .arg(command)
-        .output()
-    {
-        Ok(output) => Ok(String::from_utf8(output.stdout).unwrap()),
-        Err(error) => Err(ba_error(format!("执行命令失败: {}", error).as_mut_str())),
-    }
-}
-
-pub async fn run_command_timeout(command: &str, timeout_second: u64) -> BDEResult<String> {
-    let timeout_duration = Duration::from_secs(timeout_second);
-
-    let mut child = Command::new("bash")
-        .arg("-c")
-        .arg(command)
-        .stdout(Stdio::piped()) // 捕获标准输出
-        .stderr(Stdio::null()) // 将标准错误重定向到空
-        .spawn()
-        .map_err(|e| format!("Failed to spawn command: {}", e))?;
-
-    // Create a future that resolves when Ctrl+C is pressed
-    let ctrl_c_future = ctrl_c();
-
-    tokio::select! {
-        // Wait for the command to complete
-        _ = child.wait() => {
-            let output = child.wait_with_output().await?;
-            if output.status.success() {
-                Ok(String::from_utf8(output.stdout).unwrap())
-            } else {
-                Err(format!("Command failed with exit code({}): {}", output.status, String::from_utf8(output.stdout).unwrap()).into())
-            }
-        }
-
-        // Wait for Ctrl+C or timeout
-        _ = timeout(timeout_duration, ctrl_c_future) => {
-            child.kill().await?;
-            Err(ba_error("Command timed out"))
-        }
     }
 }
 

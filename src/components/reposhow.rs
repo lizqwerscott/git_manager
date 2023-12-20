@@ -11,7 +11,7 @@ use crate::gitrepo::{GitRepo, GitStatus};
 
 #[derive(Debug)]
 pub struct ReposShow {
-    pub show_repos: Vec<(String, String, String)>,
+    pub show_repos: Vec<(usize, String, String, String)>,
     pub refresh_repop: bool,
     pub state: TableState,
 }
@@ -25,7 +25,7 @@ impl ReposShow {
         }
     }
 
-    pub fn update_show_repos(&mut self, repos: &Vec<GitRepo>, input: &str) -> BDEResult<()> {
+    pub fn update_show_repos(&mut self, repos: &[GitRepo], input: &str) -> BDEResult<()> {
         let mut filter_key: Vec<GitStatus> = Vec::new();
         let mut other_search: Vec<&str> = Vec::new();
 
@@ -46,7 +46,7 @@ impl ReposShow {
         let search_key = other_search.join(" ");
 
         self.show_repos.clear();
-        for repo in repos {
+        for (index, repo) in repos.iter().enumerate() {
             let name = repo.name.clone();
             let repo_path = repo.path.display().to_string();
             let mut path: Vec<&str> = repo_path.split('/').collect();
@@ -58,7 +58,7 @@ impl ReposShow {
 
             if input.is_empty() {
                 self.show_repos
-                    .push((name, path.join("/"), status.to_string()));
+                    .push((index, name, path.join("/"), status.to_string()));
             } else {
                 let filter_status_inp = if filter_key.is_empty() {
                     true
@@ -68,7 +68,7 @@ impl ReposShow {
 
                 if filter_status_inp && name.to_lowercase().contains(&search_key) {
                     self.show_repos
-                        .push((name, path.join("/"), status.to_string()));
+                        .push((index, name, path.join("/"), status.to_string()));
                 }
             }
         }
@@ -76,7 +76,16 @@ impl ReposShow {
         Ok(())
     }
 
+    pub fn get_select_repo_id(&self) -> Option<usize> {
+        let show_repo_index = self.state.selected()?;
+        Some(self.show_repos[show_repo_index].0)
+    }
+
     pub fn next(&mut self) {
+        if self.show_repos.is_empty() {
+            return;
+        }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.show_repos.len() - 1 {
@@ -91,6 +100,10 @@ impl ReposShow {
     }
 
     pub fn previous(&mut self) {
+        if self.show_repos.is_empty() {
+            return;
+        }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -112,6 +125,8 @@ impl Component for ReposShow {
             KeyCode::Char('f') => Some(AppAction::StartFilter),
             KeyCode::Char('j') => Some(AppAction::SelectNext),
             KeyCode::Char('k') => Some(AppAction::SelectPervious),
+            KeyCode::Char('y') => Some(AppAction::SelectCopyPath),
+            KeyCode::Enter => Some(AppAction::SelectEnter),
             _ => None,
         })
     }
@@ -135,9 +150,9 @@ impl Component for ReposShow {
             for (index, repo) in self.show_repos.iter().enumerate() {
                 table_rows.push(Row::new(vec![
                     format!("{}", index),
-                    repo.0.clone(),
                     repo.1.clone(),
                     repo.2.clone(),
+                    repo.3.clone(),
                 ]));
             }
 

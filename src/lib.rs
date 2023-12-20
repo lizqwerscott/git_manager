@@ -16,7 +16,7 @@ pub mod utils;
 use gitrepo::search_all_git_repo;
 use gitrepo::GitRepo;
 use states::{AppAction, AppMode};
-use utils::BDEResult;
+use utils::{copy_to_clipboard, BDEResult};
 
 use components::{input::Input, reposhow::ReposShow, Component};
 
@@ -162,7 +162,14 @@ impl App {
                     AppAction::SelectPervious => {
                         self.component_repos_show.previous();
                     }
-                    _ => {}
+                    AppAction::SelectEnter => {}
+                    AppAction::SelectCopyPath => {
+                        if let Some(repo_id) = self.component_repos_show.get_select_repo_id() {
+                            let repo = &self.repos[repo_id];
+                            let path = repo.path.display().to_string();
+                            let _ = copy_to_clipboard(&path);
+                        }
+                    } // _ => {}
                 }
             }
 
