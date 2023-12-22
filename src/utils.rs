@@ -130,7 +130,6 @@ pub async fn run_command_timeout_no(command: &str, timeout_second: u64) -> BDERe
     }
 }
 
-
 // 需要安装 xclip
 pub fn copy_to_clipboard(text: &str) -> BDEResult<()> {
     let command = format!("echo '{}' | xclip -selection clipboard", text);

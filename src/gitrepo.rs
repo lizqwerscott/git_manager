@@ -188,3 +188,11 @@ pub async fn search_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>,
 
     Ok((git_repos, err_len))
 }
+
+#[cfg(test)]
+mod test {
+    #[test]
+    #[ignore]
+    fn test() {
+    }
+}
