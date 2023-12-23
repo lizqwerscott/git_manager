@@ -13,7 +13,7 @@ mod gitrepo;
 mod states;
 pub mod utils;
 
-use gitrepo::search_all_git_repo;
+use gitrepo::get_all_git_repo;
 use gitrepo::GitRepo;
 use states::{AppAction, AppMode};
 use utils::{copy_to_clipboard, BDEResult};
@@ -29,6 +29,7 @@ struct App {
 
     component_input: Input,
     component_repos_show: ReposShow,
+    duration: f64,
 }
 
 impl App {
@@ -62,6 +63,8 @@ impl App {
             ])
             .split(f.size());
 
+        let use_time = format!("search time: {}s", self.duration);
+
         let (msg, style) = match self.run_mode {
             AppMode::Normal => (
                 vec![
@@ -71,7 +74,8 @@ impl App {
                     "f".bold(),
                     " to start filter repo, ".bold(),
                     "g".into(),
-                    " to refresh repo.".bold(),
+                    " to refresh repo, ".bold(),
+                    use_time.as_str().into(),
                 ],
                 Style::default().add_modifier(Modifier::RAPID_BLINK),
             ),
@@ -98,6 +102,7 @@ impl App {
         let (run_tx, mut run_rx) = mpsc::unbounded_channel();
         let (search_data_tx, mut search_data_rx) = mpsc::unbounded_channel();
         let (data_tx, mut data_rx) = mpsc::unbounded_channel();
+        let (time_tx, mut time_rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
             let mut runp = true;
@@ -113,10 +118,11 @@ impl App {
                 };
 
                 if get_datap {
+                    let start = tokio::time::Instant::now();
                     let test_path_1 = "~/";
                     // let test_path_2 = "~/AndroidStudioProjects/";
                     let search_path = Path::new(test_path_1);
-                    match search_all_git_repo(search_path).await {
+                    match get_all_git_repo(search_path).await {
                         Ok(res) => {
                             data_tx.send(res).unwrap();
                         }
@@ -124,6 +130,8 @@ impl App {
                             data_tx.send((Vec::new(), 0)).unwrap();
                         }
                     }
+                    let duration = start.elapsed();
+                    time_tx.send(duration).unwrap();
                     get_datap = false;
                 }
             }
@@ -133,6 +141,11 @@ impl App {
             if let Ok(data) = data_rx.try_recv() {
                 self.repos = data.0;
                 self.component_repos_show.refresh_repop = false;
+            }
+
+            if let Ok(duraction) = time_rx.try_recv() {
+                self.duration = duraction.as_secs_f64();
+                // println!("Time elapsed in expensive_function() is: {:?}", duration);
             }
 
             if let Some(action) = self.handle_events()? {
@@ -195,6 +208,7 @@ pub async fn run() -> BDEResult<()> {
         run_mode: AppMode::Normal,
         component_input: Input::new(),
         component_repos_show: ReposShow::new(),
+        duration: 0.0,
     };
 
     enable_raw_mode()?;
