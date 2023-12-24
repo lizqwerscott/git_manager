@@ -62,15 +62,24 @@ impl Input {
         new_cursor_pos.clamp(0, self.input.len())
     }
 
-    // fn reset_cursor(&mut self) {
-    //     self.cursor_position = 0;
-    // }
+    fn reset_cursor(&mut self) {
+        self.cursor_position = 0;
+    }
+
+    fn clear_input(&mut self) {
+        self.input = String::from("");
+        self.reset_cursor();
+    }
 }
 
 impl Component for Input {
     fn handle_events(&mut self, key: KeyEvent) -> BDEResult<Option<AppAction>> {
         Ok(match key.code {
-            KeyCode::Esc => Some(AppAction::ExitFilter),
+            KeyCode::Esc => {
+                self.clear_input();
+                Some(AppAction::ExitFilter)
+            }
+            KeyCode::Enter => Some(AppAction::ExitFilter),
             KeyCode::Char(to_insert) => {
                 self.enter_char(to_insert);
                 None
@@ -101,7 +110,7 @@ impl Component for Input {
                 AppMode::Normal => Style::default(),
                 AppMode::Editing => Style::default().fg(Color::Yellow),
             })
-            .block(Block::default().borders(Borders::ALL).title("Input"));
+            .block(Block::default().borders(Borders::ALL).title("Filter"));
         f.render_widget(input, rect);
 
         match mode {
