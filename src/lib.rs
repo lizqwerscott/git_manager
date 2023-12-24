@@ -63,7 +63,7 @@ impl App {
             ])
             .split(f.size());
 
-        self.component_statusbar.draw(self.run_mode, f, main_layout[0]);
+        self.component_statusbar.draw(self.run_mode, f, main_layout[0])?;
 
         self.component_input
             .draw(self.run_mode, f, main_layout[1])?;
