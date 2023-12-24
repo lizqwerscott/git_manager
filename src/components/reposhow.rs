@@ -26,12 +26,18 @@ impl ReposShow {
     }
 
     pub fn update_show_repos(&mut self, repos: &[GitRepo], input: &str) -> BDEResult<()> {
+        let mut use_path_search = false;
         let mut filter_key: Vec<GitStatus> = Vec::new();
         let mut other_search: Vec<&str> = Vec::new();
 
         let key_lst: Vec<&str> = input.trim().split(' ').collect();
 
         for key in key_lst {
+            if key == "+path" {
+                use_path_search = true;
+                continue;
+            }
+
             if key.len() > 1 && key.starts_with('+') {
                 if let Ok(filter_status) = GitStatus::from_str(&key[1..]) {
                     filter_key.push(filter_status);
@@ -66,7 +72,13 @@ impl ReposShow {
                     filter_key.iter().any(|item| *item == repo.status)
                 };
 
-                if filter_status_inp && name.to_lowercase().contains(&search_key) {
+                let search_item = if use_path_search {
+                    path.join("/")
+                } else {
+                    name.clone()
+                };
+
+                if filter_status_inp && search_item.contains(&search_key) {
                     self.show_repos
                         .push((index, name, path.join("/"), status.to_string()));
                 }
