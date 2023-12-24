@@ -3,6 +3,7 @@ use ratatui::prelude::{Frame, Rect};
 
 pub mod input;
 pub mod reposhow;
+pub mod statusbar;
 
 use crate::states::{AppAction, AppMode};
 use crate::utils::BDEResult;

@@ -18,7 +18,7 @@ use gitrepo::GitRepo;
 use states::{AppAction, AppMode};
 use utils::{copy_to_clipboard, BDEResult};
 
-use components::{input::Input, reposhow::ReposShow, Component};
+use components::{input::Input, reposhow::ReposShow, statusbar::StatusBar, Component};
 
 #[derive(Debug)]
 struct App {
@@ -29,7 +29,7 @@ struct App {
 
     component_input: Input,
     component_repos_show: ReposShow,
-    duration: f64,
+    component_statusbar: StatusBar,
 }
 
 impl App {
@@ -63,34 +63,11 @@ impl App {
             ])
             .split(f.size());
 
-        let use_time = format!("search time: {}s", self.duration);
-
-        let (msg, style) = match self.run_mode {
-            AppMode::Normal => (
-                vec![
-                    "Press ".into(),
-                    "q".bold(),
-                    " to exit, ".into(),
-                    "f".bold(),
-                    " to start filter repo, ".bold(),
-                    "g".into(),
-                    " to refresh repo, ".bold(),
-                    use_time.as_str().into(),
-                ],
-                Style::default().add_modifier(Modifier::RAPID_BLINK),
-            ),
-            AppMode::Editing => (
-                vec!["Press ".into(), "Esc".bold(), " to stop search, ".into()],
-                Style::default(),
-            ),
-        };
-
-        let mut text = Text::from(Line::from(msg));
-        text.patch_style(style);
-        f.render_widget(Paragraph::new(text), main_layout[0]);
+        self.component_statusbar.draw(self.run_mode, f, main_layout[0]);
 
         self.component_input
             .draw(self.run_mode, f, main_layout[1])?;
+
         self.component_repos_show
             .draw(self.run_mode, f, main_layout[2])?;
 
@@ -144,8 +121,7 @@ impl App {
             }
 
             if let Ok(duraction) = time_rx.try_recv() {
-                self.duration = duraction.as_secs_f64();
-                // println!("Time elapsed in expensive_function() is: {:?}", duration);
+                self.component_statusbar.search_repo_duration = duraction.as_secs_f64();
             }
 
             if let Some(action) = self.handle_events()? {
@@ -186,6 +162,9 @@ impl App {
                 }
             }
 
+            self.component_statusbar.all_repo_len = self.repos.len();
+            self.component_statusbar.show_repo_len = self.component_repos_show.show_repos.len();
+
             self.component_repos_show
                 .update_show_repos(&self.repos, &self.component_input.input)?;
 
@@ -208,7 +187,7 @@ pub async fn run() -> BDEResult<()> {
         run_mode: AppMode::Normal,
         component_input: Input::new(),
         component_repos_show: ReposShow::new(),
-        duration: 0.0,
+        component_statusbar: StatusBar::new(),
     };
 
     enable_raw_mode()?;
