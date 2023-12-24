@@ -1,8 +1,7 @@
-use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{prelude::*, widgets::*};
 
 use super::Component;
-use crate::states::{AppAction, AppMode};
+use crate::states::AppMode;
 use crate::utils::BDEResult;
 
 #[derive(Debug)]
@@ -24,7 +23,6 @@ impl StatusBar {
 
 impl Component for StatusBar {
     fn draw(&mut self, mode: AppMode, f: &mut Frame<'_>, rect: Rect) -> BDEResult<()> {
-
         let status_bar_layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -54,16 +52,19 @@ impl Component for StatusBar {
         f.render_widget(Paragraph::new(text), status_bar_layout[0]);
 
         let use_time = format!("search time: {}s", self.search_repo_duration);
-        let repo_number =  if self.all_repo_len == 0 {
+        let repo_number = if self.all_repo_len == 0 {
             String::from("repo: 0")
         } else {
             format!("repo: {}/{}", self.show_repo_len, self.all_repo_len)
         };
 
-        let text = Text::from(Line::from(vec![use_time.into(), " | ".into(), repo_number.into()]));
+        let text = Text::from(Line::from(vec![
+            use_time.into(),
+            " | ".into(),
+            repo_number.into(),
+        ]));
         f.render_widget(Paragraph::new(text), status_bar_layout[1]);
 
         Ok(())
     }
-
 }

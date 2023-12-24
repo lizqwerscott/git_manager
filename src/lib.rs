@@ -3,7 +3,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use ratatui::{prelude::*, widgets::*};
+use ratatui::prelude::*;
 use std::io::stdout;
 use std::path::Path;
 use tokio::sync::mpsc;
@@ -63,7 +63,8 @@ impl App {
             ])
             .split(f.size());
 
-        self.component_statusbar.draw(self.run_mode, f, main_layout[0])?;
+        self.component_statusbar
+            .draw(self.run_mode, f, main_layout[0])?;
 
         self.component_input
             .draw(self.run_mode, f, main_layout[1])?;
