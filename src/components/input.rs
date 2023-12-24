@@ -137,10 +137,8 @@ impl Component for Input {
     fn handle_events(&mut self, key: KeyEvent) -> BDEResult<Option<AppAction>> {
         Ok(match key.code {
             KeyCode::Esc => {
-                self.clear_input();
                 Some(AppAction::ExitFilter)
             }
-            // KeyCode::Enter => Some(AppAction::ExitFilter),
             KeyCode::Char(to_insert) => {
                 self.enter_char(to_insert);
                 None
