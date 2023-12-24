@@ -66,11 +66,11 @@ impl App {
         self.component_statusbar
             .draw(self.run_mode, f, main_layout[0])?;
 
-        self.component_input
-            .draw(self.run_mode, f, main_layout[1])?;
-
         self.component_repos_show
             .draw(self.run_mode, f, main_layout[2])?;
+
+        self.component_input
+            .draw(self.run_mode, f, main_layout[1])?;
 
         Ok(())
     }
@@ -159,9 +159,12 @@ impl App {
                             let path = repo.path.display().to_string();
                             let _ = copy_to_clipboard(&path);
                         }
-                    } // _ => {}
+                    }
+                    _ => {}
                 }
             }
+
+            self.component_input.update_complection()?;
 
             self.component_statusbar.all_repo_len = self.repos.len();
             self.component_statusbar.show_repo_len = self.component_repos_show.show_repos.len();

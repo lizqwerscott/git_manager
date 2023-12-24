@@ -324,7 +324,11 @@ pub async fn get_all_git_repo(search_path: &Path) -> BDEResult<(Vec<GitRepo>, u6
 
 #[cfg(test)]
 mod test {
+    use super::GitStatus;
+
     #[test]
-    #[ignore]
-    fn test() {}
+    // #[ignore]
+    fn test() {
+        println!("status: {}", GitStatus::NeedPull.to_string());
+    }
 }

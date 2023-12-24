@@ -13,5 +13,6 @@ pub enum AppAction {
     SelectPervious,
     SelectEnter,
     SelectCopyPath,
+    ComplectionFinish,
     Quit,
 }

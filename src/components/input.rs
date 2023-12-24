@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{prelude::*, widgets::*};
 
+use super::popup::CompletionPopup;
 use super::Component;
 use crate::states::{AppAction, AppMode};
 use crate::utils::BDEResult;
@@ -10,6 +11,8 @@ pub struct Input {
     pub input: String,
     /// Position of cursor in the editor area.
     cursor_position: usize,
+
+    component_popup: CompletionPopup,
 }
 
 impl Input {
@@ -17,6 +20,7 @@ impl Input {
         Input {
             input: String::from(""),
             cursor_position: 0,
+            component_popup: CompletionPopup::default(),
         }
     }
 
@@ -28,6 +32,16 @@ impl Input {
     fn move_cursor_right(&mut self) {
         let cursor_moved_right = self.cursor_position.saturating_add(1);
         self.cursor_position = self.clamp_cursor(cursor_moved_right);
+    }
+
+    fn move_cursor_right_n(&mut self, n: usize) {
+        let cursor_moved_right = self.cursor_position.saturating_add(n);
+        self.cursor_position = self.clamp_cursor(cursor_moved_right);
+    }
+
+    fn enter_string(&mut self, new_str: &str) {
+        self.input.push_str(new_str);
+        self.move_cursor_right_n(new_str.len());
     }
 
     fn enter_char(&mut self, new_char: char) {
@@ -70,6 +84,53 @@ impl Input {
         self.input = String::from("");
         self.reset_cursor();
     }
+
+    pub fn update_complection(&mut self) -> BDEResult<()> {
+        let complection_all = vec![
+            String::from("path"),
+            String::from("NeedPull"),
+            String::from("Clean"),
+            String::from("NeedPush"),
+            String::from("NeedCommit"),
+            String::from("Timeout"),
+        ];
+
+        self.component_popup.show = false;
+
+        let input_split: Vec<&str> = self.input.split(' ').collect();
+
+        if let Some(last_input) = input_split.last() {
+            if let Some(stripped) = last_input.strip_prefix('+') {
+                let filter_complection_input = stripped;
+
+                let filter_complections: Vec<(String, String)> = complection_all
+                    .into_iter()
+                    .filter_map(|item| {
+                        if item.starts_with(filter_complection_input) {
+                            let res = item.replace(filter_complection_input, "");
+                            if res.is_empty() {
+                                None
+                            } else {
+                                Some((item, res))
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if !filter_complections.is_empty() {
+                    self.component_popup.show = true;
+                    if self.component_popup.get_select().is_none() {
+                        self.component_popup.state.select(Some(0));
+                    }
+                    self.component_popup.completions = filter_complections.clone();
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Component for Input {
@@ -79,7 +140,7 @@ impl Component for Input {
                 self.clear_input();
                 Some(AppAction::ExitFilter)
             }
-            KeyCode::Enter => Some(AppAction::ExitFilter),
+            // KeyCode::Enter => Some(AppAction::ExitFilter),
             KeyCode::Char(to_insert) => {
                 self.enter_char(to_insert);
                 None
@@ -96,7 +157,20 @@ impl Component for Input {
                 self.move_cursor_right();
                 None
             }
-            _ => None,
+            _ => {
+                if self.component_popup.show {
+                    if let Some(AppAction::ComplectionFinish) =
+                        self.component_popup.handle_events(key)?
+                    {
+                        if let Some(input_text) = self.component_popup.get_select() {
+                            self.enter_string(&input_text);
+                            self.component_popup.completions.clear();
+                        }
+                    }
+                }
+
+                None
+            }
         })
     }
     fn draw(
@@ -105,10 +179,27 @@ impl Component for Input {
         f: &mut ratatui::prelude::Frame<'_>,
         rect: ratatui::prelude::Rect,
     ) -> BDEResult<()> {
-        let input = Paragraph::new(self.input.as_str())
+        let completion_show_text = match self.component_popup.get_select_str() {
+            Some(text) => {
+                if self.component_popup.show {
+                    text
+                } else {
+                    ""
+                }
+            }
+            None => "",
+        };
+
+        let text = vec![
+            self.input.as_str().into(),
+            Span::styled(completion_show_text, Style::new().bold()),
+        ];
+
+        let input = Paragraph::new(Line::from(text))
             .style(match mode {
                 AppMode::Normal => Style::default(),
-                AppMode::Editing => Style::default().fg(Color::Yellow),
+                // AppMode::Editing => Style::default().bg(Color::Yellow),
+                AppMode::Editing => Style::default(),
             })
             .block(Block::default().borders(Borders::ALL).title("Filter"));
         f.render_widget(input, rect);
@@ -124,6 +215,12 @@ impl Component for Input {
                     rect.y + 1,
                 )
             }
+        }
+
+        // 需要在整个区域内最后绘制, 否则会被覆盖
+        if self.component_popup.show {
+            let area = Rect::new(rect.x + self.cursor_position as u16 + 1, rect.y + 2, 20, 10);
+            self.component_popup.draw(mode, f, area)?;
         }
         Ok(())
     }

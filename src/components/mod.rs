@@ -2,6 +2,7 @@ use crossterm::event::KeyEvent;
 use ratatui::prelude::{Frame, Rect};
 
 pub mod input;
+pub mod popup;
 pub mod reposhow;
 pub mod statusbar;
 
