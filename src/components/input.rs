@@ -276,7 +276,17 @@ impl Component for Input {
             && mode == AppMode::Editing
             && !self.component_popup.complection_finish
         {
-            let area = Rect::new(rect.x + self.cursor_position as u16 + 1, rect.y + 2, 20, 10);
+            let mut need_height = (self.component_popup.completions.len() as f32 * 1.3).round() as u16;
+
+            if need_height < 2 {
+                need_height = 4;
+            }
+
+            if need_height > 10 {
+                need_height = 10;
+            }
+
+            let area = Rect::new(rect.x + self.cursor_position as u16 + 1, rect.y + 2, 20, need_height);
             self.component_popup.draw(mode, f, area)?;
         }
         Ok(())
