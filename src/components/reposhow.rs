@@ -27,6 +27,7 @@ impl ReposShow {
 
     pub fn update_show_repos(&mut self, repos: &[GitRepo], input: &str) -> BDEResult<()> {
         let mut use_path_search = false;
+        let mut use_match_case = false;
         let mut filter_key: Vec<GitStatus> = Vec::new();
         let mut other_search: Vec<&str> = Vec::new();
 
@@ -35,6 +36,11 @@ impl ReposShow {
         for key in key_lst {
             if key == "+path" {
                 use_path_search = true;
+                continue;
+            }
+
+            if key == "+match_case" {
+                use_match_case = true;
                 continue;
             }
 
@@ -49,7 +55,7 @@ impl ReposShow {
             }
         }
 
-        let search_key = other_search.join(" ");
+        // let search_key = other_search.join(" ");
 
         self.show_repos.clear();
         for (index, repo) in repos.iter().enumerate() {
@@ -62,10 +68,7 @@ impl ReposShow {
             path.insert(0, "~");
             let status = repo.status.to_string();
 
-            if input.is_empty() {
-                self.show_repos
-                    .push((index, name, path.join("/"), status.to_string()));
-            } else {
+            if !input.is_empty() {
                 let filter_status_inp = if filter_key.is_empty() {
                     true
                 } else {
@@ -78,11 +81,36 @@ impl ReposShow {
                     name.clone()
                 };
 
-                if filter_status_inp && search_item.contains(&search_key) {
-                    self.show_repos
-                        .push((index, name, path.join("/"), status.to_string()));
+                if !filter_status_inp {
+                    continue;
+                }
+
+                let mut contain_allp = true;
+
+                for search_key in &other_search {
+                    if use_match_case {
+                        if !search_item.contains(search_key) {
+                            contain_allp = false;
+                            break;
+                        }
+                    } else {
+                        if !search_item
+                            .to_lowercase()
+                            .contains(&search_key.to_lowercase())
+                        {
+                            contain_allp = false;
+                            break;
+                        }
+                    }
+                }
+
+                if !contain_allp {
+                    continue;
                 }
             }
+
+            self.show_repos
+                .push((index, name, path.join("/"), status.to_string()));
         }
 
         Ok(())

@@ -142,6 +142,7 @@ impl Input {
     pub fn update_complection(&mut self) -> BDEResult<()> {
         let complection_all = vec![
             String::from("path"),
+            String::from("match_case"),
             String::from("NeedPull"),
             String::from("Clean"),
             String::from("NeedPush"),
