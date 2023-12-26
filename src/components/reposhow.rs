@@ -75,32 +75,34 @@ impl ReposShow {
                     filter_key.iter().any(|item| *item == repo.status)
                 };
 
+                if !filter_status_inp {
+                    continue;
+                }
+
                 let search_item = if use_path_search {
                     path.join("/")
                 } else {
                     name.clone()
                 };
 
-                if !filter_status_inp {
-                    continue;
-                }
+                let search_item = if use_match_case {
+                    search_item
+                } else {
+                    search_item.to_lowercase()
+                };
 
                 let mut contain_allp = true;
 
                 for search_key in &other_search {
-                    if use_match_case {
-                        if !search_item.contains(search_key) {
-                            contain_allp = false;
-                            break;
-                        }
+                    let search_key = if use_match_case {
+                        String::from(*search_key)
                     } else {
-                        if !search_item
-                            .to_lowercase()
-                            .contains(&search_key.to_lowercase())
-                        {
-                            contain_allp = false;
-                            break;
-                        }
+                        search_key.to_lowercase()
+                    };
+
+                    if !search_item.contains(&search_key) {
+                        contain_allp = false;
+                        break;
                     }
                 }
 
