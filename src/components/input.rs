@@ -149,6 +149,20 @@ impl Input {
             String::from("Timeout"),
         ];
 
+        if self.input.is_empty() {
+            self.component_popup.completions.clear();
+            return Ok(());
+        }
+
+        if self.input.ends_with(' ') {
+            self.component_popup.completions.clear();
+            return Ok(());
+        }
+
+        if self.component_popup.complection_finish {
+            return Ok(());
+        }
+
         let input_split: Vec<&str> = self.input.split(' ').collect();
 
         if let Some(last_input) = input_split.last() {
@@ -276,9 +290,10 @@ impl Component for Input {
             && mode == AppMode::Editing
             && !self.component_popup.complection_finish
         {
-            let mut need_height = (self.component_popup.completions.len() as f32 * 1.3).round() as u16;
+            let mut need_height =
+                (self.component_popup.completions.len() as f32 * 2.0).round() as u16;
 
-            if need_height < 2 {
+            if need_height < 4 {
                 need_height = 4;
             }
 
@@ -286,7 +301,12 @@ impl Component for Input {
                 need_height = 10;
             }
 
-            let area = Rect::new(rect.x + self.cursor_position as u16 + 1, rect.y + 2, 20, need_height);
+            let area = Rect::new(
+                rect.x + self.cursor_position as u16 + 1,
+                rect.y + 2,
+                20,
+                need_height,
+            );
             self.component_popup.draw(mode, f, area)?;
         }
         Ok(())
