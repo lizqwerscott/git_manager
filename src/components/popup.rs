@@ -5,31 +5,43 @@ use super::Component;
 use crate::states::{AppAction, AppMode};
 use crate::utils::BDEResult;
 
+#[derive(Debug, Clone)]
+pub struct CompletionItem {
+    pub score: u16,
+    pub text: String,
+}
+
 #[derive(Debug)]
 pub struct CompletionPopup {
-    pub show: bool,
+    pub complection_finish: bool,
     pub state: ListState,
-    pub completions: Vec<(String, String)>,
+    pub input_len: usize,
+    pub completions: Vec<CompletionItem>,
 }
 
 impl CompletionPopup {
     pub fn default() -> Self {
         CompletionPopup {
-            show: false,
+            complection_finish: false,
             state: ListState::default(),
+            input_len: 0,
             completions: Vec::new(),
         }
     }
 
-    pub fn get_select(&self) -> Option<String> {
-        let i = self.state.selected()?;
-        self.completions.get(i).map(|item| item.1.clone())
+    pub fn showp(&self) -> bool {
+        !self.completions.is_empty()
     }
 
-    pub fn get_select_str(&self) -> Option<&str> {
+    pub fn get_select(&self) -> Option<String> {
         let i = self.state.selected()?;
-        self.completions.get(i).map(|item| item.1.as_str())
+        self.completions.get(i).map(|item| item.text.clone())
     }
+
+    // pub fn get_select_str(&self) -> Option<&str> {
+    //     let i = self.state.selected()?;
+    //     self.completions.get(i).map(|item| item.text.as_str())
+    // }
 
     fn next(&mut self) {
         let i = match self.state.selected() {
@@ -72,7 +84,7 @@ impl Component for CompletionPopup {
                 None
             }
             KeyCode::Enter => {
-                self.show = false;
+                self.complection_finish = true;
                 Some(AppAction::ComplectionFinish)
             }
             _ => None,
@@ -83,7 +95,7 @@ impl Component for CompletionPopup {
         let items: Vec<ListItem> = self
             .completions
             .iter()
-            .map(|item| ListItem::new(Line::from(vec![item.0.as_str().into()])))
+            .map(|item| ListItem::new(Line::from(vec![item.text.as_str().into()])))
             .collect();
 
         let select_style = Style::new().add_modifier(Modifier::REVERSED);
