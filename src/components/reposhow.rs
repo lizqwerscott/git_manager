@@ -26,6 +26,10 @@ impl ReposShow {
     }
 
     pub fn update_show_repos(&mut self, repos: &[GitRepo], input: &str) -> BDEResult<()> {
+        if self.refresh_repop {
+            return Ok(());
+        }
+
         let mut use_path_search = false;
         let mut use_match_case = false;
         let mut filter_key: Vec<GitStatus> = Vec::new();

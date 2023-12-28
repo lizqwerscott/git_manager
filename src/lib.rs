@@ -135,6 +135,7 @@ impl App {
                     AppAction::StartRefresh => {
                         if !self.component_repos_show.refresh_repop {
                             self.component_repos_show.refresh_repop = true;
+                            self.component_repos_show.show_repos.clear();
                             search_data_tx.send(true)?;
                         }
                     }
