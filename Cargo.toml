@@ -14,5 +14,5 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 
 [[bin]]
-  name = "git-manager"
+  name = "gm"
   path = "./src/main.rs"
